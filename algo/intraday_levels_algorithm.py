@@ -1,26 +1,22 @@
 """
 This algorithm trades on price levels 0.00, 0.25, 0.50, 0.75.
 """
-import numpy as np
-import math
 import logbook
+import numpy as np
 
 from zipline.api import (
     attach_pipeline,
     date_rules,
-    history,
     order,
-    order_target,
     pipeline_output,
     record,
     schedule_function,
     set_max_leverage,
-    symbol,
     time_rules,
 )
 from zipline.pipeline import Pipeline, CustomFactor
-from zipline.pipeline.factors import SimpleMovingAverage
 from zipline.pipeline.data import USEquityPricing
+from zipline.pipeline.factors import SimpleMovingAverage
 
 """
 Algorithm constants
@@ -36,13 +32,10 @@ intraday_cents_to_level = 2
 
 log = logbook.Logger("ZiplineLog")
 
-
-"""
-Called once at the start of the algorithm.
-"""
-
-
 def initialize(context):
+    """
+    Called once at the start of the algorithm.
+    """
     # Skiping leverage
     set_max_leverage(0.0)
 
@@ -50,7 +43,7 @@ def initialize(context):
     schedule_function(
         my_rebalance,
         date_rules.every_day(),
-        time_rules.market_open(hours=1)
+        time_rules.every_minute()
     )
 
     # Close all positions every day, 30 minutes before market close.
@@ -71,12 +64,10 @@ def initialize(context):
     attach_pipeline(make_screener(), 'stock_screener')
 
 
-"""
-Daily screener for securities to trade
-"""
-
-
-def make_screener():
+def make_screener(self):
+    """
+    Daily screener for securities to trade
+    """
 
     #  Average volume for last 2 weeks.
     average_volume = SimpleMovingAverage(inputs=[USEquityPricing.volume], window_length=10)
@@ -99,20 +90,19 @@ def make_screener():
             'short': short
         },
         screen=(
-                (average_volume > minimum_daily_volume) &
-                (sma_10 >= 5) &
-                (sma_10 <= 50) &
-                (average_true_range >= minimum_atr)
-                )
+            (average_volume > minimum_daily_volume) &
+            (sma_10 >= 5) &
+            (sma_10 <= 50) &
+            (average_true_range >= minimum_atr)
+        )
     )
 
 
-"""
-Called every day before market open.
-"""
-
-
 def before_trading_start(context, data):
+    """
+    Called every day before market open.
+    """
+
     # Pipeline_output returns a pandas DataFrame with the results of our factors
     # and filters.
     context.output = pipeline_output('stock_screener')
@@ -139,12 +129,10 @@ def before_trading_start(context, data):
     log.info("Today's shorts: " + ", ".join([short_.symbol for short_ in context.short_secs]))
 
 
-"""
-This function is called before market close everyday and closes all open positions.
-"""
-
-
 def close_positions(context, data):
+    """
+    This function is called before market close everyday and closes all open positions.
+    """
     for position in context.portfolio.positions:
         log.debug(
             'Closing position for ' + position.sid + ', amount: ' + position.amount + ', cost: ' + position.cost_basis)
@@ -152,21 +140,18 @@ def close_positions(context, data):
         order(position.sid, position.amount)
 
 
-"""
-Execute orders according to our schedule_function() timing.
-"""
-
-
 def my_rebalance(context, data):
+    """
+    Execute orders according to our schedule_function() timing.
+    """
     pass
 
 
-"""
-This function is called at the end of each day and plots certain variables.
-"""
-
-
 def my_record_vars(context, data):
+    """
+    This function is called at the end of each day and plots certain variables.
+    """
+
     # Check how many long and short positions we have.
     longs = shorts = 0
     for position in context.portfolio.positions.itervalues():
@@ -181,12 +166,11 @@ def my_record_vars(context, data):
     record(leverage=context.account.leverage, long_count=longs, short_count=shorts)
 
 
-"""
-Called every minute.
-"""
-
-
 def handle_data(context, data):
+    """
+    Called every minute.
+    """
+
     # Getting stock with up-trend
     up_trend = up_trend_intraday(context.long_secs, data)
     # Getting stock with long box
@@ -199,46 +183,42 @@ def handle_data(context, data):
     #        order_target_value(stock, -shares_amount, style=LimitOrder(limit_price, exchange=IBExchange.SMART))
 
 
-"""
-Calculates down-trend intraday
-"""
-
-
 def up_trend_intraday(securities, data):
+    """
+    Calculates down-trend intraday
+    """
     sma_fast = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency).mean()
 
+    sma_slow = data.history(securities, "low", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
 
-sma_slow = data.history(securities, "low", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
+    trend = np.greater(sma_fast, sma_slow)
 
-trend = np.greater(sma_fast, sma_slow)
+    log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
 
-log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
-
-return trend
-
-"""
-Calculates down-trend intraday
-"""
+    return trend
 
 
 def down_trend_intraday(securities, data):
+    """
+    Calculates down-trend intraday
+    """
+
     sma_fast = data.history(securities, "high", bar_count=intraday_trend_fast, frequency=intraday_frequency).mean()
 
+    sma_slow = data.history(securities, "high", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
 
-sma_slow = data.history(securities, "high", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
+    trend = np.less(sma_fast, sma_slow)
 
-trend = np.less(sma_fast, sma_slow)
+    log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
 
-log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
-
-return trend
-
-"""
-Shows that stock has buy box on level
-"""
+    return trend
 
 
 def long_box(securities, data):
+    """
+    Shows that stock has buy box on level
+    """
+
     prices = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency)
     # Get minimum price
     min_price = prices.min()
@@ -251,26 +231,24 @@ def long_box(securities, data):
     cents_to_level = np.mod(np.multiply(min_price, 100), 25)
     box = np.less_equal(cents_to_level, intraday_cents_to_level)  # maximux intraday_cents_to_level cents from level
 
-
-return box
-
-"""
-Shows that stock has sell box on level
-"""
+    return box
 
 
 def short_box(securities, data):
+    """
+    Shows that stock has sell box on level
+    """
+
     return False
 
 
-"""
-Computes the trend strenght.
-
-Pre-declares high and low as default inputs and `window_length` as 1.
-"""
-
-
 class TrendFactor(CustomFactor):
+    """
+    Computes the trend strenght.
+
+    Pre-declares high and low as default inputs and `window_length` as 1.
+    """
+
     inputs = [USEquityPricing.high, USEquityPricing.low]
     outputs = ['long', 'short']
     window_length = 15
