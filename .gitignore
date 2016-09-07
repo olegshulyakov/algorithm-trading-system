@@ -87,3 +87,10 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# Idea files
+.idea/
+
+# Eclipse project
+.project
+.pydevproject
