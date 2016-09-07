@@ -1,5 +1,4 @@
 from zipline.api import (
-    add_history,
     history,
     order_target,
     record,
@@ -8,12 +7,7 @@ from zipline.api import (
 
 
 def initialize(context):
-    # Register 2 histories that track daily prices,
-    # one with a 100 window and one with a 300 day window
-    add_history(100, '1d', 'price')
-    add_history(300, '1d', 'price')
     context.i = 0
-
 
 def handle_data(context, data):
     # Skip first 300 days to get full windows
@@ -24,8 +18,8 @@ def handle_data(context, data):
     # Compute averages
     # history() has to be called with the same params
     # from above and returns a pandas dataframe.
-    short_mavg = history(100, '1d', 'price').mean()
-    long_mavg = history(300, '1d', 'price').mean()
+    short_mavg = data.history(100, '1d', 'price').mean()
+    long_mavg = data.history(300, '1d', 'price').mean()
 
     sym = symbol('AAPL')
 
