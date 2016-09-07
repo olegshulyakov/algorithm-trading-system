@@ -2,7 +2,7 @@
 This algorithm trades on price levels 0.00, 0.25, 0.50, 0.75.
 """
 import logbook
-import numpy as np
+import numpy
 
 from zipline.api import (
     attach_pipeline,
@@ -18,9 +18,7 @@ from zipline.pipeline import Pipeline, CustomFactor
 from zipline.pipeline.data import USEquityPricing
 from zipline.pipeline.factors import SimpleMovingAverage
 
-"""
-Algorithm constants
-"""
+# Algorithm constants
 daily_trend_strength = 2
 minimum_daily_volume = 1000000
 minimum_atr = 0.5
@@ -36,6 +34,7 @@ def initialize(context):
     """
     Called once at the start of the algorithm.
     """
+
     # Skiping leverage
     set_max_leverage(0.0)
 
@@ -43,7 +42,7 @@ def initialize(context):
     schedule_function(
         my_rebalance,
         date_rules.every_day(),
-        time_rules.every_minute()
+        time_rules.market_open(hours=1)
     )
 
     # Close all positions every day, 30 minutes before market close.
@@ -64,7 +63,7 @@ def initialize(context):
     attach_pipeline(make_screener(), 'stock_screener')
 
 
-def make_screener(self):
+def make_screener():
     """
     Daily screener for securities to trade
     """
@@ -76,8 +75,7 @@ def make_screener(self):
     sma_10 = SimpleMovingAverage(inputs=[USEquityPricing.close], window_length=10)
 
     # ATR for last 2 weeks
-    average_true_range = SimpleMovingAverage(inputs=[USEquityPricing.high], window_length=10) - SimpleMovingAverage(
-        inputs=[USEquityPricing.low], window_length=10)
+    average_true_range = SimpleMovingAverage(inputs=[USEquityPricing.high], window_length=10) - SimpleMovingAverage(inputs=[USEquityPricing.low], window_length=10)
 
     long, short = TrendFactor()
 
@@ -133,6 +131,7 @@ def close_positions(context, data):
     """
     This function is called before market close everyday and closes all open positions.
     """
+
     for position in context.portfolio.positions:
         log.debug(
             'Closing position for ' + position.sid + ', amount: ' + position.amount + ', cost: ' + position.cost_basis)
@@ -176,7 +175,7 @@ def handle_data(context, data):
     # Getting stock with long box
     box_to_buy = long_box(context.long_secs, data)
     # Combine rules
-    should_buy = np.equal(up_trend, box_to_buy)
+    should_buy = numpy.equal(up_trend, box_to_buy)
 
     # for stock in context.short_secs:
     #    if (data.can_trade(stock)):
@@ -187,13 +186,13 @@ def up_trend_intraday(securities, data):
     """
     Calculates down-trend intraday
     """
-    sma_fast = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency).mean()
 
-    sma_slow = data.history(securities, "low", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
+    sma_fast = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency).as_matrix().mean()
+    sma_slow = data.history(securities, "low", bar_count=intraday_trend_slow, frequency=intraday_frequency).as_matrix().mean()
 
-    trend = np.greater(sma_fast, sma_slow)
+    trend = numpy.greater(sma_fast, sma_slow)
 
-    log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
+    # log.debug("Up-trend stocks: "+", ".join([security_.symbol for security_ in securities[trend == True]]))
 
     return trend
 
@@ -203,13 +202,12 @@ def down_trend_intraday(securities, data):
     Calculates down-trend intraday
     """
 
-    sma_fast = data.history(securities, "high", bar_count=intraday_trend_fast, frequency=intraday_frequency).mean()
+    sma_fast = data.history(securities, "high", bar_count=intraday_trend_fast, frequency=intraday_frequency).as_matrix().mean()
+    sma_slow = data.history(securities, "high", bar_count=intraday_trend_slow, frequency=intraday_frequency).as_matrix().mean()
 
-    sma_slow = data.history(securities, "high", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
+    trend = numpy.less(sma_fast, sma_slow)
 
-    trend = np.less(sma_fast, sma_slow)
-
-    log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
+    # log.debug("Down-trend stocks: "+", ".join([security_.symbol for security_ in securities[trend == True]]))
 
     return trend
 
@@ -219,18 +217,31 @@ def long_box(securities, data):
     Shows that stock has buy box on level
     """
 
-    prices = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency)
+    prices = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency).as_matrix()
     # Get minimum price
-    min_price = prices.min()
+    min_price = prices.min(axis=0)
+
+    log.info("Data type: " + str(type(data)))
+    log.info("Prices type: " + str(type(prices)))
+    log.info("Prices sharp: " + str(prices.shape))
+    log.info("Min prices sharp: " + str(min_price.shape))
+    distance = numpy.ones(prices.shape)
+    log.info("Start point: " + str(distance.shape))
+    distance = min_price * distance
+    log.info("Distance: " + str(distance.shape))
+
     # Check that all prices are near each other
-    if (np.greater(np.add(prices, -min_price).max()),
-        intraday_cents_to_level):  # bug in np.add(prices, -min_price) - wrong dimentions
-        return np.zeros(prices.shape, dtype=bool)
+    distance_to_minimum = numpy.subtract(prices, distance)
+    log.info("Distance to minimum: " + str(distance_to_minimum.shape))
+    max_distance = numpy.ones(prices.shape) * intraday_cents_to_level
+    log.info("max_distance: " + str(max_distance.shape))
+
+    if (numpy.greater_equal(distance_to_minimum, max_distance)):
+        return numpy.zeros(prices.shape, dtype=bool)
 
     # Count distance to .25 level
-    cents_to_level = np.mod(np.multiply(min_price, 100), 25)
-    box = np.less_equal(cents_to_level, intraday_cents_to_level)  # maximux intraday_cents_to_level cents from level
-
+    cents_to_level = numpy.mod(100 * min_price, 25)
+    box = numpy.less_equal(cents_to_level, intraday_cents_to_level)  # maximux intraday_cents_to_level cents from level
     return box
 
 
@@ -255,14 +266,14 @@ class TrendFactor(CustomFactor):
 
     def compute(self, today, assets, out, high, low):
         # Initialization
-        out.long = np.nan_to_num(out.long)
-        out.short = np.nan_to_num(out.short)
+        out.long = numpy.nan_to_num(out.long)
+        out.short = numpy.nan_to_num(out.short)
 
         i = self.window_length - 1
         # Calculate trends recursively
         while (i > 0):
             # Calculate long trend size
-            up_trend = np.greater_equal(low[-i], low[-i - 1])
+            up_trend = numpy.greater_equal(low[-i], low[-i - 1])
             # log.debug(str(up_trend))
             # log.debug(str(out.long))
             out.long[up_trend == True] += 1
@@ -271,7 +282,7 @@ class TrendFactor(CustomFactor):
             # log.debug(str(out.long))
 
             # Calculate short trend size
-            down_trend = np.less_equal(high[-i], high[-i - 1])
+            down_trend = numpy.less_equal(high[-i], high[-i - 1])
             out.short[down_trend == True] += 1
             out.short[down_trend == False] = 0
             i = i - 1
