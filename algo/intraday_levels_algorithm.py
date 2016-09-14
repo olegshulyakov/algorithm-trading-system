@@ -14,6 +14,7 @@ from zipline.api import (
     set_max_leverage,
     time_rules,
 )
+from zipline.finance.execution import StopLimitOrder
 from zipline.pipeline import Pipeline, CustomFactor
 from zipline.pipeline.data import USEquityPricing
 from zipline.pipeline.factors import SimpleMovingAverage
@@ -30,12 +31,21 @@ intraday_trend_fast = 10 # in minutes
 intraday_trend_slow = 30 # in minutes
 intraday_cents_to_level = 2
 
+position_amount = 500 # shares
+stop_size = 0.05 # in dollars
+target_profit = 0.20 # in dollars
+cents_to_market = 0.02
+
 log = logbook.Logger("ZiplineLog")
 
 def initialize(context):
     """
     Called once at the start of the algorithm.
     """
+    
+    set_slippage(slippage.VolumeShareSlippage(volume_limit=0.025, price_impact=0.1))
+    set_commission(commission.PerShare(cost=0.01, min_trade_cost=1.00))
+    
     # Rebalance every day, 1 hour after market open.
     schedule_function(
         my_rebalance,
@@ -129,11 +139,10 @@ def close_positions(context, data):
     """
     This function is called before market close everyday and closes all open positions.
     """
-    for position in context.portfolio.positions:
-        log.debug(
-            'Closing position for ' + position.sid + ', amount: ' + position.amount + ', cost: ' + position.cost_basis)
-
-        order(position.sid, position.amount)
+    
+    for position in context.portfolio.positions.values():
+        log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
+        order_target(position.sid, 0)
 
 
 def my_rebalance(context, data):
@@ -166,9 +175,22 @@ def handle_data(context, data):
     Called every minute.
     """
 
-    to_buy = filter_securities_to_buy(context.long_secs, data)
-    if to_buy:
-        log.debug("Up-trend stocks: "+", ".join([security_.symbol for security_ in to_buy]))
+    securities_to_buy = filter_securities_to_buy(context.long_secs, data)
+    if securities_to_buy:
+        log.debug("Up-trend stocks: "+", ".join([security_.symbol for security_ in securities_to_buy]))
+        
+    for security in securities_to_buy:
+        
+        if (security in context.portfolio.positions.keys()):
+            continue
+        
+        price = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix().min() + cents_to_market
+        stop_price = price - stop_size
+        target_price = price + target_profit
+        order_target(security, position_amount, style=LimitOrder(price))
+        order_target(security, 0, style=StopOrder(stop_price))
+        order_target(security, 0, style=LimitOrder(price + target_profit))
+        log.debug("Buying {} price={}, stop={}, target={}", security.symbol, price, stop_price, target_price, style="{")
 
 
 def filter_securities_to_buy(securities, data):
@@ -177,6 +199,10 @@ def filter_securities_to_buy(securities, data):
     """
     result_list = []
     for security in securities:
+        
+        if not data.can_trade(security):
+            continue
+        
         data_history_fast = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix()
         data_history_slow = data.history(security, "low", intraday_trend_slow, intraday_frequency).as_matrix()
 
