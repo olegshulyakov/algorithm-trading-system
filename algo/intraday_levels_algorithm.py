@@ -2,7 +2,7 @@
 This algorithm trades on price levels 0.00, 0.25, 0.50, 0.75.
 """
 import logbook
-import numpy as np
+import numpy
 
 from zipline.api import (
     attach_pipeline,
@@ -26,8 +26,8 @@ minimum_daily_volume = 1000000
 minimum_atr = 0.5
 shares_amount = 100
 intraday_frequency = "1m"
-intraday_trend_fast = 10  # in minutes
-intraday_trend_slow = 30  # in minutes
+intraday_trend_fast = 10 # in minutes
+intraday_trend_slow = 30 # in minutes
 intraday_cents_to_level = 2
 
 log = logbook.Logger("ZiplineLog")
@@ -36,14 +36,11 @@ def initialize(context):
     """
     Called once at the start of the algorithm.
     """
-    # Skiping leverage
-    set_max_leverage(0.0)
-
     # Rebalance every day, 1 hour after market open.
     schedule_function(
         my_rebalance,
         date_rules.every_day(),
-        time_rules.every_minute()
+        time_rules.market_open(hours=1)
     )
 
     # Close all positions every day, 30 minutes before market close.
@@ -76,8 +73,7 @@ def make_screener(self):
     sma_10 = SimpleMovingAverage(inputs=[USEquityPricing.close], window_length=10)
 
     # ATR for last 2 weeks
-    average_true_range = SimpleMovingAverage(inputs=[USEquityPricing.high], window_length=10) - SimpleMovingAverage(
-        inputs=[USEquityPricing.low], window_length=10)
+    average_true_range = SimpleMovingAverage(inputs=[USEquityPricing.high], window_length=10) - SimpleMovingAverage(inputs=[USEquityPricing.low], window_length=10)
 
     long, short = TrendFactor()
 
@@ -90,11 +86,11 @@ def make_screener(self):
             'short': short
         },
         screen=(
-            (average_volume > minimum_daily_volume) &
-            (sma_10 >= 5) &
-            (sma_10 <= 50) &
-            (average_true_range >= minimum_atr)
-        )
+                (average_volume > minimum_daily_volume) &
+                (sma_10 >= 5) &
+                (sma_10 <= 50) &
+                (average_true_range >= minimum_atr)
+               )
     )
 
 
@@ -151,7 +147,6 @@ def my_record_vars(context, data):
     """
     This function is called at the end of each day and plots certain variables.
     """
-
     # Check how many long and short positions we have.
     longs = shorts = 0
     for position in context.portfolio.positions.itervalues():
@@ -163,7 +158,7 @@ def my_record_vars(context, data):
     # Record and plot the leverage of our portfolio over time as well as the
     # number of long and short positions. Even in minute mode, only the end-of-day
     # leverage is plotted.
-    record(leverage=context.account.leverage, long_count=longs, short_count=shorts)
+    record(leverage = context.account.leverage, long_count=longs, short_count=shorts)
 
 
 def handle_data(context, data):
@@ -171,75 +166,50 @@ def handle_data(context, data):
     Called every minute.
     """
 
-    # Getting stock with up-trend
-    up_trend = up_trend_intraday(context.long_secs, data)
-    # Getting stock with long box
-    box_to_buy = long_box(context.long_secs, data)
-    # Combine rules
-    should_buy = np.equal(up_trend, box_to_buy)
-
-    # for stock in context.short_secs:
-    #    if (data.can_trade(stock)):
-    #        order_target_value(stock, -shares_amount, style=LimitOrder(limit_price, exchange=IBExchange.SMART))
+    to_buy = filter_securities_to_buy(context.long_secs, data)
+    if to_buy:
+        log.debug("Up-trend stocks: "+", ".join([security_.symbol for security_ in to_buy]))
 
 
-def up_trend_intraday(securities, data):
+def filter_securities_to_buy(securities, data):
     """
-    Calculates down-trend intraday
+    Filters securities that we should buy
     """
-    sma_fast = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency).mean()
+    result_list = []
+    for security in securities:
+        data_history_fast = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix()
+        data_history_slow = data.history(security, "low", intraday_trend_slow, intraday_frequency).as_matrix()
 
-    sma_slow = data.history(securities, "low", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
+        if (numpy.isnan(data_history_fast).any() or numpy.isnan(data_history_fast).any()):
+            continue
 
-    trend = np.greater(sma_fast, sma_slow)
+        # calculating up-trend intraday
+        sma_fast = data_history_fast.mean()
+        sma_slow = data_history_slow.mean()
 
-    log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
+        if (sma_fast < sma_slow):
+            continue
 
-    return trend
+        prices = data_history_fast
+        # get minimum price
+        min_price = prices.min()
 
+        # count distance to .25 level
+        cents_to_level = 100 * min_price % 25
 
-def down_trend_intraday(securities, data):
-    """
-    Calculates down-trend intraday
-    """
+        # check that price is near level
+        if (cents_to_level > intraday_cents_to_level):
+            continue
 
-    sma_fast = data.history(securities, "high", bar_count=intraday_trend_fast, frequency=intraday_frequency).mean()
+        # Check that all prices are near minimum
+        difference_to_minimum = numpy.subtract( prices, min_price * numpy.ones(prices.shape) ) * 100
 
-    sma_slow = data.history(securities, "high", bar_count=intraday_trend_slow, frequency=intraday_frequency).mean()
+        if (difference_to_minimum.max() > intraday_cents_to_level):
+            continue
 
-    trend = np.less(sma_fast, sma_slow)
+        result_list.append(security)
 
-    log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities[trend == True]]))
-
-    return trend
-
-
-def long_box(securities, data):
-    """
-    Shows that stock has buy box on level
-    """
-
-    prices = data.history(securities, "low", bar_count=intraday_trend_fast, frequency=intraday_frequency)
-    # Get minimum price
-    min_price = prices.min()
-    # Check that all prices are near each other
-    if (np.greater(np.add(prices, -min_price).max()),
-        intraday_cents_to_level):  # bug in np.add(prices, -min_price) - wrong dimentions
-        return np.zeros(prices.shape, dtype=bool)
-
-    # Count distance to .25 level
-    cents_to_level = np.mod(np.multiply(min_price, 100), 25)
-    box = np.less_equal(cents_to_level, intraday_cents_to_level)  # maximux intraday_cents_to_level cents from level
-
-    return box
-
-
-def short_box(securities, data):
-    """
-    Shows that stock has sell box on level
-    """
-
-    return False
+    return result_list
 
 
 class TrendFactor(CustomFactor):
@@ -249,29 +219,29 @@ class TrendFactor(CustomFactor):
     Pre-declares high and low as default inputs and `window_length` as 1.
     """
 
-    inputs = [USEquityPricing.high, USEquityPricing.low]
+    inputs = [USEquityPricing.high,USEquityPricing.low]
     outputs = ['long', 'short']
     window_length = 15
 
     def compute(self, today, assets, out, high, low):
         # Initialization
-        out.long = np.nan_to_num(out.long)
-        out.short = np.nan_to_num(out.short)
+        out.long = numpy.nan_to_num(out.long)
+        out.short = numpy.nan_to_num(out.short)
 
         i = self.window_length - 1
         # Calculate trends recursively
         while (i > 0):
             # Calculate long trend size
-            up_trend = np.greater_equal(low[-i], low[-i - 1])
-            # log.debug(str(up_trend))
-            # log.debug(str(out.long))
+            up_trend = numpy.greater_equal(low[-i], low[-i-1])
+            #log.debug(str(up_trend))
+            #log.debug(str(out.long))
             out.long[up_trend == True] += 1
-            # log.debug(str(out.long))
+            #log.debug(str(out.long))
             out.long[up_trend == False] = 0
-            # log.debug(str(out.long))
+            #log.debug(str(out.long))
 
             # Calculate short trend size
-            down_trend = np.less_equal(high[-i], high[-i - 1])
+            down_trend = numpy.less_equal(high[-i], high[-i-1])
             out.short[down_trend == True] += 1
             out.short[down_trend == False] = 0
             i = i - 1
