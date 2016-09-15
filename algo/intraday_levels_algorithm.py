@@ -140,7 +140,6 @@ def my_record_vars(context, data):
     # Check how many long and short positions we have.
     longs = shorts = 0
     for position in context.portfolio.positions.itervalues():
-        log.debug(str(position))
         if position.amount > 0:
             longs += 1
         if position.amount < 0:
