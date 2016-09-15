@@ -129,6 +129,7 @@ def close_positions(context, data):
         log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
         order_target(position.sid, 0)
 
+    my_record_vars(context, data)
 
 def my_rebalance(context, data):
     """ Execute orders according to our schedule_function() timing. """
