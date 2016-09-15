@@ -17,7 +17,7 @@ from zipline.api import (
     set_commission,
 )
 from zipline.finance import slippage, commission
-from zipline.finance.execution import LimitOrder, StopOrder
+from zipline.finance.execution import LimitOrder
 from zipline.pipeline import Pipeline, CustomFactor
 from zipline.pipeline.data import USEquityPricing
 from zipline.pipeline.factors import SimpleMovingAverage
@@ -41,11 +41,8 @@ cents_to_market = 0.02
 
 log = logbook.Logger("ZiplineLog")
 
-
 def initialize(context):
-    """
-    Called once at the start of the algorithm.
-    """
+    """ Called once at the start of the algorithm. """
 
     set_slippage(slippage.VolumeShareSlippage(volume_limit=0.025, price_impact=0.1))
     set_commission(commission.PerShare(cost=0.01, min_trade_cost=1.00))
@@ -65,21 +62,12 @@ def initialize(context):
         time_rules.market_close(minutes=30)
     )
 
-    # Record tracking variables at the end of each day.
-    schedule_function(
-        my_record_vars,
-        date_rules.every_day(),
-        time_rules.market_close()
-    )
-
     # Create our dynamic stock selector.
     attach_pipeline(make_screener(), 'stock_screener')
 
 
 def make_screener():
-    """
-    Daily screener for securities to trade
-    """
+    """ Daily screener for securities to trade """
 
     #  Average volume for last 2 weeks.
     average_volume = SimpleMovingAverage(inputs=[USEquityPricing.volume], window_length=10)
@@ -110,19 +98,11 @@ def make_screener():
 
 
 def before_trading_start(context, data):
-    """
-    Called every day before market open.
-    """
+    """ Called every day before market open. """
 
     # Pipeline_output returns a pandas DataFrame with the results of our factors
     # and filters.
     context.output = pipeline_output('stock_screener')
-
-    # Sets the list of securities we want to long as the securities with a 'True'.
-    context.long_secs = context.output[context.output['long'] >= daily_trend_strength].index
-
-    # Sets the list of securities we want to short as the securities with a 'True'.
-    context.short_secs = context.output[context.output['short'] >= daily_trend_strength].index
 
     # These are the securities that we are interested in trading each day.
     context.security_list = context.output.index
@@ -132,38 +112,35 @@ def before_trading_start(context, data):
 
     # log.debug('Securities: ' + str(context.output))
     log.info('Found securities to trade: ' + str(len(context.security_list)))
-    log.info('Found securities to trade LONG: ' + str(len(context.long_secs)))
-    log.info('Found securities to trade SHORT: ' + str(len(context.short_secs)))
 
-    # Log the long and short orders each week.
-    log.info("Today's longs: " + ", ".join([long_.symbol for long_ in context.long_secs]))
-    log.info("Today's shorts: " + ", ".join([short_.symbol for short_ in context.short_secs]))
+    # Sets the list of securities we want to long as the securities with a 'True'.
+    long_secs = context.output[context.output['long'] >= daily_trend_strength].index
+    context.long_trader = LongTrader(context, data, long_secs)
+
+    # Sets the list of securities we want to short as the securities with a 'True'.
+    short_secs = context.output[context.output['short'] >= daily_trend_strength].index
+    context.short_trader = LongTrader(context, data, short_secs)
 
 
 def close_positions(context, data):
-    """
-    This function is called before market close everyday and closes all open positions.
-    """
+    """ This function is called before market close everyday and closes all open positions. """
 
-    for position in context.portfolio.positions.values():
+    for position in context.portfolio.positions.itervalues():
         log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
         order_target(position.sid, 0)
 
 
 def my_rebalance(context, data):
-    """
-    Execute orders according to our schedule_function() timing.
-    """
+    """ Execute orders according to our schedule_function() timing. """
     pass
 
 
 def my_record_vars(context, data):
-    """
-    This function is called at the end of each day and plots certain variables.
-    """
+    """ This function is called at the end of each day and plots certain variables. """
     # Check how many long and short positions we have.
     longs = shorts = 0
     for position in context.portfolio.positions.itervalues():
+        log.debug(str(position))
         if position.amount > 0:
             longs += 1
         if position.amount < 0:
@@ -176,79 +153,188 @@ def my_record_vars(context, data):
 
 
 def handle_data(context, data):
-    """
-    Called every minute.
-    """
-
-    securities_to_buy = filter_securities_to_buy(context.long_secs, data)
-    if securities_to_buy:
-        log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities_to_buy]))
-
-    for security in securities_to_buy:
-
-        if (security in context.portfolio.positions.keys()):
-            continue
-
-        price = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix().min() + cents_to_market
-        stop_price = price - stop_size
-        target_price = price + target_profit
-        order_target(security, position_amount, style=LimitOrder(price))
-        order_target(security, 0, style=StopOrder(stop_price))
-        order_target(security, 0, style=LimitOrder(price + target_profit))
-        log.debug("Buying {} price={}, stop={}, target={}", security.symbol, price, stop_price, target_price, style="{")
+    """ Called every minute. """
+    context.long_trader.trade()
+    context.short_trader.trade()
+    my_record_vars(context, data)
 
 
-def filter_securities_to_buy(securities, data):
-    """
-    Filters securities that we should buy
-    """
-    result_list = []
-    for security in securities:
+class LongTrader():
+    """ Class to open and close long positions """
 
-        if not data.can_trade(security):
-            continue
+    def __init__(self, context, data, securities):
+        self.context = context
+        self.data = data
+        self.securities = securities
+        log.info('Found securities to trade : ' + str(len(securities)))
+        log.info("Today's longs: " + ", ".join([security_.symbol for security_ in securities]))
 
-        data_history_fast = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix()
-        data_history_slow = data.history(security, "low", intraday_trend_slow, intraday_frequency).as_matrix()
+    def trade(self):
+        self.open()
+        self.close()
 
-        if (numpy.isnan(data_history_fast).any() or numpy.isnan(data_history_fast).any()):
-            continue
+    def open(self):
+        """ Open long positions """
 
-        # calculating up-trend intraday
-        sma_fast = data_history_fast.mean()
-        sma_slow = data_history_slow.mean()
+        securities_to_buy = self.filter_securities(self.securities, self.data)
+        if securities_to_buy:
+            log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities_to_buy]))
 
-        if (sma_fast < sma_slow):
-            continue
+        for security in securities_to_buy:
 
-        prices = data_history_fast
-        # get minimum price
-        min_price = prices.min()
+            if security in self.context.portfolio.positions.keys():
+                continue
 
-        # count distance to .25 level
-        cents_to_level = 100 * min_price % 25
+            price = self.data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix().min() + cents_to_market
+            order_target(security, position_amount, style=LimitOrder(price))
+            log.info("Buying " + str(security.symbol) + ", price  =" + str(price))
 
-        # check that price is near level
-        if (cents_to_level > intraday_cents_to_level):
-            continue
+    def close(self):
+        """ Check long positions to close """
 
-        # Check that all prices are near minimum
-        difference_to_minimum = numpy.subtract(prices, min_price * numpy.ones(prices.shape)) * 100
+        for position in self.context.portfolio.positions.itervalues():
 
-        if (difference_to_minimum.max() > intraday_cents_to_level):
-            continue
+            if position.amount < 0:
+                continue
 
-        result_list.append(security)
+            stop_price = position.cost_basis - stop_size
+            target_price = position.cost_basis + target_profit
+            if position.last_sale_price <= stop_price or position.last_sale_price >= target_price:
+                log.debug("Closing " + str(position))
+                order_target(position.sid, 0)
 
-    return result_list
+    def filter_securities(self, securities, data):
+        """ Filters securities that we should buy """
+        result_list = []
+        for security in securities:
+
+            if not data.can_trade(security):
+                continue
+
+            data_history_fast = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix()
+            data_history_slow = data.history(security, "low", intraday_trend_slow, intraday_frequency).as_matrix()
+
+            if numpy.isnan(data_history_fast).any() or numpy.isnan(data_history_fast).any():
+                continue
+
+            # calculating up-trend intraday
+            sma_fast = data_history_fast.mean()
+            sma_slow = data_history_slow.mean()
+
+            if sma_fast < sma_slow:
+                continue
+
+            prices = data_history_fast
+            # get minimum price
+            min_price = prices.min()
+
+            # count distance to .25 level
+            cents_to_level = 100 * min_price % 25
+
+            # check that price is near level
+            if cents_to_level > intraday_cents_to_level:
+                continue
+
+            # Check that all prices are near minimum
+            difference_to_minimum = numpy.subtract(prices, min_price * numpy.ones(prices.shape)) * 100
+
+            if difference_to_minimum.max() > intraday_cents_to_level:
+                continue
+
+            result_list.append(security)
+
+        return result_list
+
+
+class ShortTrader():
+    """ Class to open and close long positions """
+
+    def __init__(self, context, data, securities):
+        self.context = context
+        self.data = data
+        self.securities = securities
+        log.info('Found securities to trade : ' + str(len(securities)))
+        log.info("Today's shorts: " + ", ".join([security_.symbol for security_ in securities]))
+
+    def trade(self):
+        self.open()
+        self.close()
+
+    def open(self):
+        """ Open short positions """
+
+        securities_to_sell = self.filter_securities(self.securities, self.data)
+        if securities_to_sell:
+            log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities_to_sell]))
+
+        for security in securities_to_sell:
+
+            if security in self.context.portfolio.positions.keys():
+                continue
+
+            price = self.data.history(security, "high", intraday_trend_fast, intraday_frequency).as_matrix().max() - cents_to_market
+            order_target(security, -position_amount, style=LimitOrder(price))
+            log.info("Selling " + str(security.symbol) + ", price  =" + str(price))
+
+    def close(self):
+        """ Check short positions to close """
+
+        for position in self.context.portfolio.positions.itervalues():
+
+            if position.amount > 0:
+                continue
+
+            stop_price = position.cost_basis + stop_size
+            target_price = position.cost_basis - target_profit
+            if position.last_sale_price >= stop_price or position.last_sale_price <= target_price:
+                log.debug("Closing " + str(position))
+                order_target(position.sid, 0)
+
+    def filter_securities(self, securities, data):
+        """ Filters securities that we should sell """
+        result_list = []
+        for security in securities:
+
+            if not data.can_trade(security):
+                continue
+
+            data_history_fast = data.history(security, "high", intraday_trend_fast, intraday_frequency).as_matrix()
+            data_history_slow = data.history(security, "high", intraday_trend_slow, intraday_frequency).as_matrix()
+
+            if numpy.isnan(data_history_fast).any() or numpy.isnan(data_history_fast).any():
+                continue
+
+            # calculating up-trend intraday
+            sma_fast = data_history_fast.mean()
+            sma_slow = data_history_slow.mean()
+
+            if sma_fast > sma_slow:
+                continue
+
+            prices = data_history_fast
+            # get minimum price
+            max_price = prices.max()
+
+            # count distance to .25 level
+            cents_to_level = 100 - 100 * max_price % 25
+
+            # check that price is near level
+            if (cents_to_level > intraday_cents_to_level):
+                continue
+
+            # Check that all prices are near minimum
+            difference_to_minimum = numpy.subtract(prices, max_price * numpy.ones(prices.shape)) * 100
+
+            if (100 - difference_to_minimum.max()) > intraday_cents_to_level:
+                continue
+
+            result_list.append(security)
+
+        return result_list
 
 
 class TrendFactor(CustomFactor):
-    """
-    Computes the trend strenght.
-
-    Pre-declares high and low as default inputs and `window_length` as 1.
-    """
+    """ Computes the trend strenght. Pre-declares high and low as default inputs and `window_length` as 1. """
 
     inputs = [USEquityPricing.high, USEquityPricing.low]
     outputs = ['long', 'short']
@@ -261,7 +347,7 @@ class TrendFactor(CustomFactor):
 
         i = self.window_length - 1
         # Calculate trends recursively
-        while (i > 0):
+        while i > 0:
             # Calculate long trend size
             up_trend = numpy.greater_equal(low[-i], low[-i - 1])
             # log.debug(str(up_trend))
