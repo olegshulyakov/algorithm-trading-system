@@ -34,12 +34,14 @@ intraday_trend_fast = 10  # in minutes
 intraday_trend_slow = 30  # in minutes
 intraday_cents_to_level = 2
 
-position_amount = 500  # shares
+position_amount = 100  # shares
 stop_size = 0.05  # in dollars
 target_profit = 0.20  # in dollars
 cents_to_market = 0.02
+daily_risk = 100  # in dollars
 
 log = logbook.Logger("ZiplineLog")
+
 
 def initialize(context):
     """ Called once at the start of the algorithm. """
@@ -131,6 +133,7 @@ def close_positions(context, data):
 
     my_record_vars(context, data)
 
+
 def my_rebalance(context, data):
     """ Execute orders according to our schedule_function() timing. """
     pass
@@ -149,13 +152,15 @@ def my_record_vars(context, data):
     # Record and plot the leverage of our portfolio over time as well as the
     # number of long and short positions. Even in minute mode, only the end-of-day
     # leverage is plotted.
-    record(leverage=context.account.leverage, long_count=longs, short_count=shorts)
+    record(leverage=context.account.leverage, pnl=context.portfolio.pnl, cash=context.portfolio.cash, long_count=longs, short_count=shorts)
 
 
 def handle_data(context, data):
     """ Called every minute. """
-    context.long_trader.trade()
-    context.short_trader.trade()
+    can_trade = context.portfolio.pnl > -daily_risk
+
+    context.long_trader.trade(can_trade)
+    context.short_trader.trade(can_trade)
     my_record_vars(context, data)
 
 
@@ -169,8 +174,10 @@ class LongTrader():
         log.info('Found securities to trade : ' + str(len(securities)))
         log.info("Today's longs: " + ", ".join([security_.symbol for security_ in securities]))
 
-    def trade(self):
-        self.open()
+    def trade(self, can_trade=False):
+        if can_trade:
+            self.open()
+
         self.close()
 
     def open(self):
@@ -256,8 +263,10 @@ class ShortTrader():
         log.info('Found securities to trade : ' + str(len(securities)))
         log.info("Today's shorts: " + ", ".join([security_.symbol for security_ in securities]))
 
-    def trade(self):
-        self.open()
+    def trade(self, can_trade=False):
+        if can_trade:
+            self.open()
+
         self.close()
 
     def open(self):
@@ -361,4 +370,4 @@ class TrendFactor(CustomFactor):
             down_trend = numpy.less_equal(high[-i], high[-i - 1])
             out.short[down_trend == True] += 1
             out.short[down_trend == False] = 0
-            i = i - 1
+            i -= 1
