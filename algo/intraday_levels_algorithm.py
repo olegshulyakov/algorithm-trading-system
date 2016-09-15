@@ -7,14 +7,17 @@ import numpy
 from zipline.api import (
     attach_pipeline,
     date_rules,
-    order,
+    order_target,
     pipeline_output,
     record,
     schedule_function,
     set_max_leverage,
     time_rules,
+    set_slippage,
+    set_commission,
 )
-from zipline.finance.execution import StopLimitOrder
+from zipline.finance import slippage, commission
+from zipline.finance.execution import LimitOrder, StopOrder
 from zipline.pipeline import Pipeline, CustomFactor
 from zipline.pipeline.data import USEquityPricing
 from zipline.pipeline.factors import SimpleMovingAverage
@@ -27,25 +30,27 @@ minimum_daily_volume = 1000000
 minimum_atr = 0.5
 shares_amount = 100
 intraday_frequency = "1m"
-intraday_trend_fast = 10 # in minutes
-intraday_trend_slow = 30 # in minutes
+intraday_trend_fast = 10  # in minutes
+intraday_trend_slow = 30  # in minutes
 intraday_cents_to_level = 2
 
-position_amount = 500 # shares
-stop_size = 0.05 # in dollars
-target_profit = 0.20 # in dollars
+position_amount = 500  # shares
+stop_size = 0.05  # in dollars
+target_profit = 0.20  # in dollars
 cents_to_market = 0.02
 
 log = logbook.Logger("ZiplineLog")
+
 
 def initialize(context):
     """
     Called once at the start of the algorithm.
     """
-    
+
     set_slippage(slippage.VolumeShareSlippage(volume_limit=0.025, price_impact=0.1))
     set_commission(commission.PerShare(cost=0.01, min_trade_cost=1.00))
-    
+    set_max_leverage(1.0)
+
     # Rebalance every day, 1 hour after market open.
     schedule_function(
         my_rebalance,
@@ -71,7 +76,7 @@ def initialize(context):
     attach_pipeline(make_screener(), 'stock_screener')
 
 
-def make_screener(self):
+def make_screener():
     """
     Daily screener for securities to trade
     """
@@ -96,11 +101,11 @@ def make_screener(self):
             'short': short
         },
         screen=(
-                (average_volume > minimum_daily_volume) &
-                (sma_10 >= 5) &
-                (sma_10 <= 50) &
-                (average_true_range >= minimum_atr)
-               )
+            (average_volume > minimum_daily_volume) &
+            (sma_10 >= 5) &
+            (sma_10 <= 50) &
+            (average_true_range >= minimum_atr)
+        )
     )
 
 
@@ -139,7 +144,7 @@ def close_positions(context, data):
     """
     This function is called before market close everyday and closes all open positions.
     """
-    
+
     for position in context.portfolio.positions.values():
         log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
         order_target(position.sid, 0)
@@ -167,7 +172,7 @@ def my_record_vars(context, data):
     # Record and plot the leverage of our portfolio over time as well as the
     # number of long and short positions. Even in minute mode, only the end-of-day
     # leverage is plotted.
-    record(leverage = context.account.leverage, long_count=longs, short_count=shorts)
+    record(leverage=context.account.leverage, long_count=longs, short_count=shorts)
 
 
 def handle_data(context, data):
@@ -177,13 +182,13 @@ def handle_data(context, data):
 
     securities_to_buy = filter_securities_to_buy(context.long_secs, data)
     if securities_to_buy:
-        log.debug("Up-trend stocks: "+", ".join([security_.symbol for security_ in securities_to_buy]))
-        
+        log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities_to_buy]))
+
     for security in securities_to_buy:
-        
+
         if (security in context.portfolio.positions.keys()):
             continue
-        
+
         price = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix().min() + cents_to_market
         stop_price = price - stop_size
         target_price = price + target_profit
@@ -199,10 +204,10 @@ def filter_securities_to_buy(securities, data):
     """
     result_list = []
     for security in securities:
-        
+
         if not data.can_trade(security):
             continue
-        
+
         data_history_fast = data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix()
         data_history_slow = data.history(security, "low", intraday_trend_slow, intraday_frequency).as_matrix()
 
@@ -228,7 +233,7 @@ def filter_securities_to_buy(securities, data):
             continue
 
         # Check that all prices are near minimum
-        difference_to_minimum = numpy.subtract( prices, min_price * numpy.ones(prices.shape) ) * 100
+        difference_to_minimum = numpy.subtract(prices, min_price * numpy.ones(prices.shape)) * 100
 
         if (difference_to_minimum.max() > intraday_cents_to_level):
             continue
@@ -245,7 +250,7 @@ class TrendFactor(CustomFactor):
     Pre-declares high and low as default inputs and `window_length` as 1.
     """
 
-    inputs = [USEquityPricing.high,USEquityPricing.low]
+    inputs = [USEquityPricing.high, USEquityPricing.low]
     outputs = ['long', 'short']
     window_length = 15
 
@@ -258,16 +263,16 @@ class TrendFactor(CustomFactor):
         # Calculate trends recursively
         while (i > 0):
             # Calculate long trend size
-            up_trend = numpy.greater_equal(low[-i], low[-i-1])
-            #log.debug(str(up_trend))
-            #log.debug(str(out.long))
+            up_trend = numpy.greater_equal(low[-i], low[-i - 1])
+            # log.debug(str(up_trend))
+            # log.debug(str(out.long))
             out.long[up_trend == True] += 1
-            #log.debug(str(out.long))
+            # log.debug(str(out.long))
             out.long[up_trend == False] = 0
-            #log.debug(str(out.long))
+            # log.debug(str(out.long))
 
             # Calculate short trend size
-            down_trend = numpy.less_equal(high[-i], high[-i-1])
+            down_trend = numpy.less_equal(high[-i], high[-i - 1])
             out.short[down_trend == True] += 1
             out.short[down_trend == False] = 0
             i = i - 1
