@@ -189,12 +189,12 @@ class LongTrader():
 
     def open(self):
         """ Open long positions """
+        securities = self.securities.difference(self.context.portfolio.positions.keys())
+        securities = self.filter_securities(securities, self.data)
+        if securities:
+            log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities]))
 
-        securities_to_buy = self.filter_securities(self.securities, self.data)
-        if securities_to_buy:
-            log.debug("Up-trend stocks: " + ", ".join([security_.symbol for security_ in securities_to_buy]))
-
-        for security in securities_to_buy:
+        for security in securities:
 
             if security in self.context.portfolio.positions.keys():
                 continue
@@ -281,12 +281,13 @@ class ShortTrader():
 
     def open(self):
         """ Open short positions """
+        securities = self.securities.difference(self.context.portfolio.positions.keys())
+        securities = self.filter_securities(securities, self.data)
 
-        securities_to_sell = self.filter_securities(self.securities, self.data)
-        if securities_to_sell:
-            log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities_to_sell]))
+        if securities:
+            log.debug("Down-trend stocks: " + ", ".join([security_.symbol for security_ in securities]))
 
-        for security in securities_to_sell:
+        for security in securities:
 
             if security in self.context.portfolio.positions.keys():
                 continue
