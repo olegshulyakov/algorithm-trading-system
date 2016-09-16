@@ -163,8 +163,19 @@ def my_record_vars(context, data):
 
 def handle_data(context, data):
     """ Called every minute. """
+
+    # Cancel existing orders
+    all_orders = get_open_orders()
+    for order_ in all_orders:
+        cancel_order(order_)
+
+    # Trade long
     context.long_trader.trade(context.risk_manager.can_trade())
+
+    # Trade short
     context.short_trader.trade(context.risk_manager.can_trade())
+
+    # Record
     my_record_vars(context, data)
 
 
