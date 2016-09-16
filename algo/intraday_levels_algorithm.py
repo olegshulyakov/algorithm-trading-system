@@ -197,9 +197,15 @@ class LongTrader():
         for security in securities:
 
             if security in self.context.portfolio.positions.keys():
+                log.debug("Already have position in " + str(security))
                 continue
 
             price = self.data.history(security, "low", intraday_trend_fast, intraday_frequency).as_matrix().min() + cents_to_market
+
+            if price * position_amount > self.context.portfolio.cash:
+                log.debug("Not enough cash to open position in " + str(security))
+                continue
+
             order_target(security, position_amount, style=LimitOrder(price))
             log.info("Buying " + str(security.symbol) + ", price  =" + str(price))
 
@@ -290,9 +296,15 @@ class ShortTrader():
         for security in securities:
 
             if security in self.context.portfolio.positions.keys():
+                log.debug("Already have position in " + str(security))
                 continue
 
             price = self.data.history(security, "high", intraday_trend_fast, intraday_frequency).as_matrix().max() - cents_to_market
+
+            if price * position_amount > self.context.portfolio.cash:
+                log.debug("Not enough cash to open position in " + str(security))
+                continue
+
             order_target(security, -position_amount, style=LimitOrder(price))
             log.info("Selling " + str(security.symbol) + ", price  =" + str(price))
 
