@@ -64,6 +64,9 @@ def initialize(context):
         time_rules.market_close(minutes=30)
     )
 
+    # Create risk manager
+    context.risk_manager = RiskManager(context, daily_risk)
+
     # Create our dynamic stock selector.
     attach_pipeline(make_screener(), 'stock_screener')
 
@@ -123,6 +126,9 @@ def before_trading_start(context, data):
     short_secs = context.output[context.output['short'] >= daily_trend_strength].index
     context.short_trader = LongTrader(context, data, short_secs)
 
+    # Drop risk count to zero
+    context.risk_manager.process_end_trade_day()
+
 
 def close_positions(context, data):
     """ This function is called before market close everyday and closes all open positions. """
@@ -157,15 +163,16 @@ def my_record_vars(context, data):
 
 def handle_data(context, data):
     """ Called every minute. """
-    can_trade = context.portfolio.pnl > -daily_risk
-
-    context.long_trader.trade(can_trade)
-    context.short_trader.trade(can_trade)
+    context.long_trader.trade(context.risk_manager.can_trade())
+    context.short_trader.trade(context.risk_manager.can_trade())
     my_record_vars(context, data)
 
 
 class LongTrader():
     """ Class to open and close long positions """
+    context = None
+    data = None
+    securities = None
 
     def __init__(self, context, data, securities):
         self.context = context
@@ -255,6 +262,9 @@ class LongTrader():
 
 class ShortTrader():
     """ Class to open and close long positions """
+    context = None
+    data = None
+    securities = None
 
     def __init__(self, context, data, securities):
         self.context = context
@@ -340,6 +350,27 @@ class ShortTrader():
             result_list.append(security)
 
         return result_list
+
+
+class RiskManager():
+    """ Class to calculate risk at current day """
+    context = None
+    previous_day_risk = 0
+    daily_risk = 0
+
+    def __init__(self, context, daily_risk):
+        self.context = context
+        self.daily_risk = daily_risk
+        self.previous_day_risk = 0
+
+    def process_end_trade_day(self):
+        self.previous_day_risk = self.context.portfolio.pnl
+
+    def can_trade(self):
+        return self.get_risk() > -self.daily_risk
+
+    def get_risk(self):
+        return self.context.portfolio.pnl - self.previous_day_risk
 
 
 class TrendFactor(CustomFactor):
