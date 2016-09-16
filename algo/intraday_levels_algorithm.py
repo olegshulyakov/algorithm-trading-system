@@ -44,7 +44,7 @@ log = logbook.Logger("ZiplineLog")
 class IntradayLevelsAlgorithm(TradingAlgorithm):
     """ This algorithm trades on price levels 0.00, 0.25, 0.50, 0.75. """
 
-    def initialize(self,context):
+    def initialize(context):
         """ Called once at the start of the algorithm. """
 
         set_slippage(slippage.VolumeShareSlippage(volume_limit=0.025, price_impact=0.1))
@@ -53,14 +53,14 @@ class IntradayLevelsAlgorithm(TradingAlgorithm):
 
         # Rebalance every day, 1 hour after market open.
         schedule_function(
-            self.my_rebalance,
+            context.my_rebalance,
             date_rules.every_day(),
             time_rules.market_open(hours=1)
         )
 
         # Close all positions every day, 30 minutes before market close.
         schedule_function(
-            self.close_positions,
+            context.close_positions,
             date_rules.every_day(),
             time_rules.market_close(minutes=30)
         )
@@ -69,9 +69,9 @@ class IntradayLevelsAlgorithm(TradingAlgorithm):
         context.risk_manager = RiskManager(context, daily_risk)
 
         # Create our dynamic stock selector.
-        attach_pipeline(self.make_screener(), 'stock_screener')
+        attach_pipeline(context.make_screener(), 'stock_screener')
 
-    def make_screener(self):
+    def make_screener(context):
         """ Daily screener for securities to trade """
 
         #  Average volume for last 2 weeks.
@@ -101,7 +101,7 @@ class IntradayLevelsAlgorithm(TradingAlgorithm):
             )
         )
 
-    def before_trading_start(self, context, data):
+    def before_trading_start(context, data):
         """ Called every day before market open. """
 
         # Pipeline_output returns a pandas DataFrame with the results of our factors
@@ -128,20 +128,20 @@ class IntradayLevelsAlgorithm(TradingAlgorithm):
         # Drop risk count to zero
         context.risk_manager.process_end_trade_day()
 
-    def close_positions(self, context, data):
+    def close_positions(context, data):
         """ This function is called before market close everyday and closes all open positions. """
 
         for position in context.portfolio.positions.itervalues():
             log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
             order_target(position.sid, 0)
 
-        self.my_record_vars(context, data)
+        context.my_record_vars(context, data)
 
-    def my_rebalance(self, context, data):
+    def my_rebalance(context, data):
         """ Execute orders according to our schedule_function() timing. """
         pass
 
-    def my_record_vars(self, context, data):
+    def my_record_vars(context, data):
         """ This function is called at the end of each day and plots certain variables. """
         # Check how many long and short positions we have.
         longs = shorts = 0
@@ -156,13 +156,13 @@ class IntradayLevelsAlgorithm(TradingAlgorithm):
         # leverage is plotted.
         record(leverage=context.account.leverage, pnl=context.portfolio.pnl, cash=context.portfolio.cash, long_count=longs, short_count=shorts)
 
-    def handle_data(self, context, data):
+    def handle_data(context, data):
         """ Called every minute. """
 
         # Cancel existing orders
-        all_orders = self.get_open_orders()
+        all_orders = context.get_open_orders()
         for order_ in all_orders:
-            self.cancel_order(order_)
+            context.cancel_order(order_)
 
         # Trade long
         context.long_trader.trade(context.risk_manager.can_trade())
@@ -171,7 +171,7 @@ class IntradayLevelsAlgorithm(TradingAlgorithm):
         context.short_trader.trade(context.risk_manager.can_trade())
 
         # Record
-        self.my_record_vars(context, data)
+        context.my_record_vars(context, data)
 
 
 class LongTrader():
