@@ -107,23 +107,23 @@ def before_trading_start(context, data):
 
     # Pipeline_output returns a pandas DataFrame with the results of our factors
     # and filters.
-    context.output = pipeline_output('stock_screener')
+    screener_output = pipeline_output('stock_screener')
 
     # These are the securities that we are interested in trading each day.
-    context.security_list = context.output.index
+    context.security_list = screener_output.index
 
     # A set of the same securities, sets have faster lookup.
     context.security_set = set(context.security_list)
 
-    # log.debug('Securities: ' + str(context.output))
+    # log.debug('Securities: ' + str(screener_output))
     log.info('Found securities to trade: ' + str(len(context.security_list)))
 
     # Sets the list of securities we want to long as the securities with a 'True'.
-    long_secs = context.output[context.output['long'] >= daily_trend_strength].index
+    long_secs = set(screener_output[screener_output['long'] >= daily_trend_strength].index)
     context.long_trader = LongTrader(context, data, long_secs)
 
     # Sets the list of securities we want to short as the securities with a 'True'.
-    short_secs = context.output[context.output['short'] >= daily_trend_strength].index
+    short_secs = set(screener_output[screener_output['short'] >= daily_trend_strength].index)
     context.short_trader = LongTrader(context, data, short_secs)
 
     # Drop risk count to zero
@@ -172,9 +172,9 @@ class LongTrader():
     """ Class to open and close long positions """
     context = None
     data = None
-    securities = None
+    securities = set()
 
-    def __init__(self, context, data, securities):
+    def __init__(self, context, data, securities=set()):
         self.context = context
         self.data = data
         self.securities = securities
@@ -264,9 +264,9 @@ class ShortTrader():
     """ Class to open and close long positions """
     context = None
     data = None
-    securities = None
+    securities = set()
 
-    def __init__(self, context, data, securities):
+    def __init__(self, context, data, securities=set()):
         self.context = context
         self.data = data
         self.securities = securities
