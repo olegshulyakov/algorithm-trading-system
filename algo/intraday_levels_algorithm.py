@@ -1,9 +1,7 @@
-"""
-This algorithm trades on price levels 0.00, 0.25, 0.50, 0.75.
-"""
 import logbook
 import numpy
 
+from zipline.algorithm import TradingAlgorithm
 from zipline.api import (
     attach_pipeline,
     date_rules,
@@ -43,140 +41,137 @@ daily_risk = 100  # in dollars
 log = logbook.Logger("ZiplineLog")
 
 
-def initialize(context):
-    """ Called once at the start of the algorithm. """
+class IntradayLevelsAlgorithm(TradingAlgorithm):
+    """ This algorithm trades on price levels 0.00, 0.25, 0.50, 0.75. """
 
-    set_slippage(slippage.VolumeShareSlippage(volume_limit=0.025, price_impact=0.1))
-    set_commission(commission.PerShare(cost=0.01, min_trade_cost=1.00))
-    set_max_leverage(1.0)
+    def initialize(self,context):
+        """ Called once at the start of the algorithm. """
 
-    # Rebalance every day, 1 hour after market open.
-    schedule_function(
-        my_rebalance,
-        date_rules.every_day(),
-        time_rules.market_open(hours=1)
-    )
+        set_slippage(slippage.VolumeShareSlippage(volume_limit=0.025, price_impact=0.1))
+        set_commission(commission.PerShare(cost=0.01, min_trade_cost=1.00))
+        set_max_leverage(1.0)
 
-    # Close all positions every day, 30 minutes before market close.
-    schedule_function(
-        close_positions,
-        date_rules.every_day(),
-        time_rules.market_close(minutes=30)
-    )
-
-    # Create risk manager
-    context.risk_manager = RiskManager(context, daily_risk)
-
-    # Create our dynamic stock selector.
-    attach_pipeline(make_screener(), 'stock_screener')
-
-
-def make_screener():
-    """ Daily screener for securities to trade """
-
-    #  Average volume for last 2 weeks.
-    average_volume = SimpleMovingAverage(inputs=[USEquityPricing.volume], window_length=10)
-
-    # SMA for last 2 weeks.
-    sma_10 = SimpleMovingAverage(inputs=[USEquityPricing.close], window_length=10)
-
-    # ATR for last 2 weeks
-    average_true_range = SimpleMovingAverage(inputs=[USEquityPricing.high], window_length=10) - SimpleMovingAverage(inputs=[USEquityPricing.low], window_length=10)
-
-    long, short = TrendFactor()
-
-    # Takin securities with price between [5, 50], average volume over million and ATR >= 0.5
-    return Pipeline(
-        columns={
-            'average_volume': average_volume,
-            'average_true_range': average_true_range,
-            'long': long,
-            'short': short
-        },
-        screen=(
-            (average_volume > minimum_daily_volume) &
-            (sma_10 >= 5) &
-            (sma_10 <= 50) &
-            (average_true_range >= minimum_atr)
+        # Rebalance every day, 1 hour after market open.
+        schedule_function(
+            self.my_rebalance,
+            date_rules.every_day(),
+            time_rules.market_open(hours=1)
         )
-    )
 
+        # Close all positions every day, 30 minutes before market close.
+        schedule_function(
+            self.close_positions,
+            date_rules.every_day(),
+            time_rules.market_close(minutes=30)
+        )
 
-def before_trading_start(context, data):
-    """ Called every day before market open. """
+        # Create risk manager
+        context.risk_manager = RiskManager(context, daily_risk)
 
-    # Pipeline_output returns a pandas DataFrame with the results of our factors
-    # and filters.
-    screener_output = pipeline_output('stock_screener')
+        # Create our dynamic stock selector.
+        attach_pipeline(self.make_screener(), 'stock_screener')
 
-    # These are the securities that we are interested in trading each day.
-    context.security_list = screener_output.index
+    def make_screener(self):
+        """ Daily screener for securities to trade """
 
-    # A set of the same securities, sets have faster lookup.
-    context.security_set = set(context.security_list)
+        #  Average volume for last 2 weeks.
+        average_volume = SimpleMovingAverage(inputs=[USEquityPricing.volume], window_length=10)
 
-    # log.debug('Securities: ' + str(screener_output))
-    log.info('Found securities to trade: ' + str(len(context.security_list)))
+        # SMA for last 2 weeks.
+        sma_10 = SimpleMovingAverage(inputs=[USEquityPricing.close], window_length=10)
 
-    # Sets the list of securities we want to long as the securities with a 'True'.
-    long_secs = set(screener_output[screener_output['long'] >= daily_trend_strength].index)
-    context.long_trader = LongTrader(context, data, long_secs)
+        # ATR for last 2 weeks
+        average_true_range = SimpleMovingAverage(inputs=[USEquityPricing.high], window_length=10) - SimpleMovingAverage(inputs=[USEquityPricing.low], window_length=10)
 
-    # Sets the list of securities we want to short as the securities with a 'True'.
-    short_secs = set(screener_output[screener_output['short'] >= daily_trend_strength].index)
-    context.short_trader = LongTrader(context, data, short_secs)
+        long, short = TrendFactor()
 
-    # Drop risk count to zero
-    context.risk_manager.process_end_trade_day()
+        # Takin securities with price between [5, 50], average volume over million and ATR >= 0.5
+        return Pipeline(
+            columns={
+                'average_volume': average_volume,
+                'average_true_range': average_true_range,
+                'long': long,
+                'short': short
+            },
+            screen=(
+                (average_volume > minimum_daily_volume) &
+                (sma_10 >= 5) &
+                (sma_10 <= 50) &
+                (average_true_range >= minimum_atr)
+            )
+        )
 
+    def before_trading_start(self, context, data):
+        """ Called every day before market open. """
 
-def close_positions(context, data):
-    """ This function is called before market close everyday and closes all open positions. """
+        # Pipeline_output returns a pandas DataFrame with the results of our factors
+        # and filters.
+        screener_output = pipeline_output('stock_screener')
 
-    for position in context.portfolio.positions.itervalues():
-        log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
-        order_target(position.sid, 0)
+        # These are the securities that we are interested in trading each day.
+        context.security_list = screener_output.index
 
-    my_record_vars(context, data)
+        # A set of the same securities, sets have faster lookup.
+        context.security_set = set(context.security_list)
 
+        # log.debug('Securities: ' + str(screener_output))
+        log.info('Found securities to trade: ' + str(len(context.security_list)))
 
-def my_rebalance(context, data):
-    """ Execute orders according to our schedule_function() timing. """
-    pass
+        # Sets the list of securities we want to long as the securities with a 'True'.
+        long_secs = set(screener_output[screener_output['long'] >= daily_trend_strength].index)
+        context.long_trader = LongTrader(context, data, long_secs)
 
+        # Sets the list of securities we want to short as the securities with a 'True'.
+        short_secs = set(screener_output[screener_output['short'] >= daily_trend_strength].index)
+        context.short_trader = LongTrader(context, data, short_secs)
 
-def my_record_vars(context, data):
-    """ This function is called at the end of each day and plots certain variables. """
-    # Check how many long and short positions we have.
-    longs = shorts = 0
-    for position in context.portfolio.positions.itervalues():
-        if position.amount > 0:
-            longs += 1
-        if position.amount < 0:
-            shorts += 1
+        # Drop risk count to zero
+        context.risk_manager.process_end_trade_day()
 
-    # Record and plot the leverage of our portfolio over time as well as the
-    # number of long and short positions. Even in minute mode, only the end-of-day
-    # leverage is plotted.
-    record(leverage=context.account.leverage, pnl=context.portfolio.pnl, cash=context.portfolio.cash, long_count=longs, short_count=shorts)
+    def close_positions(self, context, data):
+        """ This function is called before market close everyday and closes all open positions. """
 
+        for position in context.portfolio.positions.itervalues():
+            log.debug('Closing position for ' + str(position.sid) + ', amount: ' + str(position.amount) + ', cost: ' + str(position.cost_basis))
+            order_target(position.sid, 0)
 
-def handle_data(context, data):
-    """ Called every minute. """
+        self.my_record_vars(context, data)
 
-    # Cancel existing orders
-    all_orders = get_open_orders()
-    for order_ in all_orders:
-        cancel_order(order_)
+    def my_rebalance(self, context, data):
+        """ Execute orders according to our schedule_function() timing. """
+        pass
 
-    # Trade long
-    context.long_trader.trade(context.risk_manager.can_trade())
+    def my_record_vars(self, context, data):
+        """ This function is called at the end of each day and plots certain variables. """
+        # Check how many long and short positions we have.
+        longs = shorts = 0
+        for position in context.portfolio.positions.itervalues():
+            if position.amount > 0:
+                longs += 1
+            if position.amount < 0:
+                shorts += 1
 
-    # Trade short
-    context.short_trader.trade(context.risk_manager.can_trade())
+        # Record and plot the leverage of our portfolio over time as well as the
+        # number of long and short positions. Even in minute mode, only the end-of-day
+        # leverage is plotted.
+        record(leverage=context.account.leverage, pnl=context.portfolio.pnl, cash=context.portfolio.cash, long_count=longs, short_count=shorts)
 
-    # Record
-    my_record_vars(context, data)
+    def handle_data(self, context, data):
+        """ Called every minute. """
+
+        # Cancel existing orders
+        all_orders = self.get_open_orders()
+        for order_ in all_orders:
+            self.cancel_order(order_)
+
+        # Trade long
+        context.long_trader.trade(context.risk_manager.can_trade())
+
+        # Trade short
+        context.short_trader.trade(context.risk_manager.can_trade())
+
+        # Record
+        self.my_record_vars(context, data)
 
 
 class LongTrader():
