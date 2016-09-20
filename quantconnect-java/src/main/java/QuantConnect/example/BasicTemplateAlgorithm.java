@@ -20,16 +20,13 @@ import cli.QuantConnect.Resolution;
 import cli.QuantConnect.SecurityType;
 
 /**
- * <summary>
  * Basic template algorithm simply initializes the date range and cash
- * </summary>
  */
 public class BasicTemplateAlgorithm extends QCAlgorithm {
     /**
-     * <summary>
      * Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
-     * </summary>
      */
+    @Override
     public void Initialize() {
         SetStartDate(2013, 10, 7);  //Set Start Date
         SetEndDate(2013, 10, 11);    //Set End Date
@@ -39,11 +36,11 @@ public class BasicTemplateAlgorithm extends QCAlgorithm {
     }
 
     /**
-     * <summary>
      * OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
-     * </summary>
-     * <param name="data">Slice object keyed by symbol containing the stock data</param>
+     *
+     * @param data Slice object keyed by symbol containing the stock data
      */
+    @Override
     public void OnData(Slice data) {
         if (!get_Portfolio().get_Invested()) {
             SetHoldings(Symbol("SPY"), 1, false);

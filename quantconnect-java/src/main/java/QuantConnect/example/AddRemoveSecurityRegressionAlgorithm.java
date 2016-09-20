@@ -1,0 +1,85 @@
+/*
+ * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
+ * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+package QuantConnect.example;
+
+import cli.QuantConnect.Algorithm.QCAlgorithm;
+import cli.QuantConnect.Data.Slice;
+import cli.QuantConnect.Orders.OrderEvent;
+import cli.QuantConnect.Orders.OrderExtensions;
+import cli.QuantConnect.Orders.OrderStatus;
+import cli.QuantConnect.Resolution;
+import cli.QuantConnect.SecurityType;
+import cli.System.Console;
+import cli.System.DateTime;
+import cli.System.DayOfWeek;
+
+/**
+ * Basic template algorithm simply initializes the date range and cash
+ */
+public class AddRemoveSecurityRegressionAlgorithm extends QCAlgorithm {
+    private DateTime lastAction;
+
+    /**
+     * Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
+     */
+    @Override
+    public void Initialize() {
+        SetStartDate(2013, 10, 07);  //Set Start Date
+        SetEndDate(2013, 10, 11);    //Set End Date
+        SetCash(100000);             //Set Strategy Cash
+        // Find more symbols here: http://quantconnect.com/data
+
+        AddSecurity(SecurityType.wrap(SecurityType.Equity), "SPY", Resolution.wrap(Resolution.Minute), true, false);
+    }
+
+    /**
+     * OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
+     *
+     * @param data Slice object keyed by symbol containing the stock data
+     */
+    @Override
+    public void OnData(Slice data) {
+        if (DateTime.get_Now().Equals(lastAction.get_Date())) return;
+
+        if (!get_Portfolio().get_Invested()) {
+            SetHoldings(Symbol("SPY"), 0.5, false);
+            lastAction = DateTime.get_Now();
+        }
+
+        if (get_Time().get_DayOfWeek() == DayOfWeek.wrap(DayOfWeek.Tuesday)) {
+            AddSecurity(SecurityType.wrap(SecurityType.Equity), "AIG", Resolution.wrap(Resolution.Minute), true, false);
+            AddSecurity(SecurityType.wrap(SecurityType.Equity), "BAC", Resolution.wrap(Resolution.Minute), true, false);
+            lastAction = DateTime.get_Now();
+        } else if (get_Time().get_DayOfWeek() == DayOfWeek.wrap(DayOfWeek.Wednesday)) {
+            SetHoldings(Symbol("AIG"), .25, false);
+            SetHoldings(Symbol("BAC"), .25, false);
+            lastAction = DateTime.get_Now();
+        } else if (get_Time().get_DayOfWeek() == DayOfWeek.wrap(DayOfWeek.Thursday)) {
+            RemoveSecurity(Symbol("BAC"));
+            RemoveSecurity(Symbol("AIG"));
+            lastAction = DateTime.get_Now();
+        }
+    }
+
+    @Override
+    public void OnOrderEvent(OrderEvent orderEvent) {
+        if (orderEvent.Status == OrderStatus.wrap(OrderStatus.Submitted)) {
+            Console.WriteLine(DateTime.get_Now() + ": Submitted: " + get_Transactions().GetOrderById(orderEvent.OrderId));
+        }
+        if (OrderExtensions.IsFill(orderEvent.Status)) {
+            Console.WriteLine(DateTime.get_Now() + ": Filled: " + get_Transactions().GetOrderById(orderEvent.OrderId));
+        }
+    }
+}
