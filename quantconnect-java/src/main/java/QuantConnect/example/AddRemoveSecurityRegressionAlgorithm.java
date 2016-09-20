@@ -51,35 +51,35 @@ public class AddRemoveSecurityRegressionAlgorithm extends QCAlgorithm {
      */
     @Override
     public void OnData(Slice data) {
-        if (DateTime.get_Now().Equals(lastAction.get_Date())) return;
+        if (get_Time().get_Date().Equals(lastAction.get_Date())) return;
 
         if (!get_Portfolio().get_Invested()) {
             SetHoldings(Symbol("SPY"), 0.5, false);
-            lastAction = DateTime.get_Now();
+            lastAction = get_Time();
         }
 
         if (get_Time().get_DayOfWeek() == DayOfWeek.wrap(DayOfWeek.Tuesday)) {
             AddSecurity(SecurityType.wrap(SecurityType.Equity), "AIG", Resolution.wrap(Resolution.Minute), true, false);
             AddSecurity(SecurityType.wrap(SecurityType.Equity), "BAC", Resolution.wrap(Resolution.Minute), true, false);
-            lastAction = DateTime.get_Now();
+            lastAction = get_Time();
         } else if (get_Time().get_DayOfWeek() == DayOfWeek.wrap(DayOfWeek.Wednesday)) {
             SetHoldings(Symbol("AIG"), .25, false);
             SetHoldings(Symbol("BAC"), .25, false);
-            lastAction = DateTime.get_Now();
+            lastAction = get_Time();
         } else if (get_Time().get_DayOfWeek() == DayOfWeek.wrap(DayOfWeek.Thursday)) {
             RemoveSecurity(Symbol("BAC"));
             RemoveSecurity(Symbol("AIG"));
-            lastAction = DateTime.get_Now();
+            lastAction = get_Time();
         }
     }
 
     @Override
     public void OnOrderEvent(OrderEvent orderEvent) {
         if (orderEvent.Status == OrderStatus.wrap(OrderStatus.Submitted)) {
-            Console.WriteLine(DateTime.get_Now() + ": Submitted: " + get_Transactions().GetOrderById(orderEvent.OrderId));
+            Console.WriteLine(get_Time() + ": Submitted: " + get_Transactions().GetOrderById(orderEvent.OrderId));
         }
         if (OrderExtensions.IsFill(orderEvent.Status)) {
-            Console.WriteLine(DateTime.get_Now() + ": Filled: " + get_Transactions().GetOrderById(orderEvent.OrderId));
+            Console.WriteLine(get_Time() + ": Filled: " + get_Transactions().GetOrderById(orderEvent.OrderId));
         }
     }
 }
