@@ -1,4 +1,4 @@
-﻿package QuantConnect;/*
+﻿/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  * 
@@ -12,6 +12,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 */
+
+package QuantConnect;
 
 import cli.QuantConnect.Algorithm.QCAlgorithm;
 import cli.QuantConnect.Data.Slice;

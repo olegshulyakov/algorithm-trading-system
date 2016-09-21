@@ -1,4 +1,4 @@
-﻿package QuantConnect.example.Benchmarks;
+﻿package QuantConnect.Benchmarks;
 
 import cli.QuantConnect.Algorithm.QCAlgorithm;
 import cli.QuantConnect.Data.Slice;

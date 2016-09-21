@@ -1,4 +1,4 @@
-﻿package QuantConnect.example.Benchmarks;
+﻿package QuantConnect.Benchmarks;
 
 import java.util.Arrays;
 import java.util.HashSet;
