@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 */
-package QuantConnect.example;
+package QuantConnect;
 
 import cli.QuantConnect.Algorithm.QCAlgorithm;
 import cli.QuantConnect.Data.Slice;
